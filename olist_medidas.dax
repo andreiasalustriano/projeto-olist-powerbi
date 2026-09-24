@@ -1,0 +1,717 @@
+// =============================================================
+// PROJETO OLIST - REGISTRO CONSOLIDADO DE DAX
+// Power BI
+// Periodo padrao da apresentacao: 01/01/2018 a 31/08/2018
+// =============================================================
+
+// -------------------------------------------------------------
+// 01. COLUNAS E TABELA CALENDARIO
+// -------------------------------------------------------------
+
+Data Compra =
+DATE(
+    YEAR(olist_orders_dataset[order_purchase_timestamp]),
+    MONTH(olist_orders_dataset[order_purchase_timestamp]),
+    DAY(olist_orders_dataset[order_purchase_timestamp])
+)
+
+Calendario =
+CALENDAR(
+    MIN(olist_orders_dataset[Data Compra]),
+    MAX(olist_orders_dataset[Data Compra])
+)
+
+Ano = YEAR(Calendario[Date])
+
+Mes Numero = MONTH(Calendario[Date])
+
+Mes = FORMAT(Calendario[Date], "MMM")
+
+Mes Ano = FORMAT(Calendario[Date], "MMM/yyyy")
+
+AnoMes Ordem =
+YEAR(Calendario[Date]) * 100 + MONTH(Calendario[Date])
+
+MesAno =
+DATE(
+    YEAR(olist_orders_dataset[order_purchase_timestamp]),
+    MONTH(olist_orders_dataset[order_purchase_timestamp]),
+    1
+)
+
+Mes Ano Exibicao = FORMAT(olist_orders_dataset[MesAno], "mmm/yyyy")
+
+// Relacionamento principal:
+// Calendario[Date] 1:* olist_orders_dataset[Data Compra]
+// Direcao de filtro: unica; relacionamento ativo.
+
+// -------------------------------------------------------------
+// 02. VENDAS - MEDIDAS BASE
+// -------------------------------------------------------------
+
+Valor Total Pago =
+SUM(olist_order_payments_dataset[payment_value])
+
+Total de Pedidos =
+DISTINCTCOUNT(olist_orders_dataset[order_id])
+
+Total Pedidos Dinâmico =
+DISTINCTCOUNT(olist_orders_dataset[order_id])
+
+Ticket Médio =
+DIVIDE(
+    [Valor Total Pago],
+    DISTINCTCOUNT(olist_orders_dataset[order_id])
+)
+
+// -------------------------------------------------------------
+// 03. VENDAS - VARIACAO MENSAL
+// -------------------------------------------------------------
+
+Valor Pago Mês Anterior =
+CALCULATE(
+    [Valor Total Pago],
+    DATEADD(Calendario[Date], -1, MONTH)
+)
+
+Variação Mensal Valor Pago =
+[Valor Total Pago] - [Valor Pago Mês Anterior]
+
+Variação Mensal % =
+DIVIDE(
+    [Variação Mensal Valor Pago],
+    [Valor Pago Mês Anterior]
+)
+
+Pedidos Mês Anterior =
+CALCULATE(
+    DISTINCTCOUNT(olist_orders_dataset[order_id]),
+    DATEADD(Calendario[Date], -1, MONTH)
+)
+
+Variação Mensal Pedidos % =
+DIVIDE(
+    DISTINCTCOUNT(olist_orders_dataset[order_id]) - [Pedidos Mês Anterior],
+    [Pedidos Mês Anterior]
+)
+
+Ticket Mês Anterior =
+CALCULATE(
+    [Ticket Médio],
+    DATEADD(Calendario[Date], -1, MONTH)
+)
+
+Variação Mensal Ticket % =
+DIVIDE(
+    [Ticket Médio] - [Ticket Mês Anterior],
+    [Ticket Mês Anterior]
+)
+
+// -------------------------------------------------------------
+// 04. ANALISE DAS QUEDAS - ESTADOS
+// -------------------------------------------------------------
+
+Valor Pago Estado Mês Anterior =
+CALCULATE(
+    [Valor Total Pago],
+    DATEADD(Calendario[Date], -1, MONTH)
+)
+
+Variação Valor Pago por Estado =
+[Valor Total Pago] - [Valor Pago Estado Mês Anterior]
+
+Variação % Valor Pago por Estado =
+DIVIDE(
+    [Variação Valor Pago por Estado],
+    [Valor Pago Estado Mês Anterior]
+)
+
+Ranking Queda por Estado =
+RANKX(
+    FILTER(
+        ALL(olist_order_customer_dataset[customer_state]),
+        [Variação Valor Pago por Estado] < 0
+    ),
+    [Variação Valor Pago por Estado],
+    ,
+    ASC,
+    DENSE
+)
+
+// -------------------------------------------------------------
+// 05. MAPA DE VENDAS - COLUNAS E MEDIDAS
+// -------------------------------------------------------------
+
+Estado Shape Map =
+SWITCH(
+    olist_order_customer_dataset[customer_state],
+    "AC", "Acre",
+    "AL", "Alagoas",
+    "AP", "Amapa",
+    "AM", "Amazonas",
+    "BA", "Bahia",
+    "CE", "Ceara",
+    "DF", "Distrito Federal",
+    "ES", "Espirito Santo",
+    "GO", "Goias",
+    "MA", "Maranhao",
+    "MT", "Mato Grosso",
+    "MS", "Mato Grosso do Sul",
+    "MG", "Minas Gerais",
+    "PA", "Para",
+    "PB", "Paraiba",
+    "PR", "Parana",
+    "PE", "Pernambuco",
+    "PI", "Piaui",
+    "RJ", "Rio de Janeiro",
+    "RN", "Rio Grande do Norte",
+    "RS", "Rio Grande do Sul",
+    "RO", "Rondonia",
+    "RR", "Roraima",
+    "SC", "Santa Catarina",
+    "SP", "Sao Paulo",
+    "SE", "Sergipe",
+    "TO", "Tocantins"
+)
+
+Ranking Valor Pago Estado =
+RANKX(
+    ALLSELECTED(olist_order_customer_dataset[Estado Shape Map]),
+    [Valor Total Pago],
+    ,
+    DESC,
+    DENSE
+)
+
+Faixa Mapa Valor Pago =
+VAR RankEstado = [Ranking Valor Pago Estado]
+VAR QtdEstados =
+    COUNTROWS(
+        ALLSELECTED(olist_order_customer_dataset[Estado Shape Map])
+    )
+RETURN
+SWITCH(
+    TRUE(),
+    RankEstado <= ROUNDUP(QtdEstados * 0.25, 0), 4,
+    RankEstado <= ROUNDUP(QtdEstados * 0.50, 0), 3,
+    RankEstado <= ROUNDUP(QtdEstados * 0.75, 0), 2,
+    1
+)
+
+// -------------------------------------------------------------
+// 06. FORMAS DE PAGAMENTO
+// -------------------------------------------------------------
+
+Forma de Pagamento =
+SWITCH(
+    olist_order_payments_dataset[payment_type],
+    "credit_card", "Cartão de crédito",
+    "boleto", "Boleto",
+    "debit_card", "Cartão de débito",
+    "voucher", "Voucher",
+    "not_defined", "Não definido",
+    olist_order_payments_dataset[payment_type]
+)
+
+Valor Pago Forma Pagamento Mês Anterior =
+CALCULATE(
+    [Valor Total Pago],
+    DATEADD(Calendario[Date], -1, MONTH)
+)
+
+Variação Valor Pago por Forma Pagamento =
+[Valor Total Pago] - [Valor Pago Forma Pagamento Mês Anterior]
+
+Variação % Valor Pago por Forma Pagamento =
+DIVIDE(
+    [Variação Valor Pago por Forma Pagamento],
+    [Valor Pago Forma Pagamento Mês Anterior]
+)
+
+// -------------------------------------------------------------
+// 07. CATEGORIAS - MEDIDAS BASE E QUEDAS
+// -------------------------------------------------------------
+
+Receita Produtos =
+SUM(olist_order_items_dataset[price])
+
+Itens Vendidos =
+COUNTROWS(olist_order_items_dataset)
+
+Preço Médio Produto =
+AVERAGE(olist_order_items_dataset[price])
+
+Frete Médio =
+AVERAGE(olist_order_items_dataset[freight_value])
+
+Receita Produtos Mês Anterior =
+CALCULATE(
+    [Receita Produtos],
+    DATEADD(Calendario[Date], -1, MONTH)
+)
+
+Variação Receita Produtos por Categoria =
+[Receita Produtos] - [Receita Produtos Mês Anterior]
+
+Variação % Receita Produtos por Categoria =
+DIVIDE(
+    [Variação Receita Produtos por Categoria],
+    [Receita Produtos Mês Anterior]
+)
+
+Ranking Queda por Categoria =
+RANKX(
+    FILTER(
+        ALL(olist_products_dataset[product_category_name]),
+        [Variação Receita Produtos por Categoria] < 0
+    ),
+    [Variação Receita Produtos por Categoria],
+    ,
+    ASC,
+    DENSE
+)
+
+Mediana Preço por Categoria =
+MEDIANX(
+    VALUES(olist_products_dataset[product_category_name]),
+    [Preço Médio Produto]
+)
+
+Mediana Volume por Categoria =
+MEDIANX(
+    VALUES(olist_products_dataset[product_category_name]),
+    [Itens Vendidos]
+)
+
+Categoria Líder =
+VAR TabelaCategorias =
+    TOPN(
+        1,
+        ADDCOLUMNS(
+            VALUES(olist_products_dataset[product_category_name]),
+            "__Valor", [Receita Produtos]
+        ),
+        [__Valor], DESC,
+        olist_products_dataset[product_category_name], ASC
+    )
+RETURN
+MAXX(TabelaCategorias, olist_products_dataset[product_category_name])
+
+Valor Categoria Líder Receita Dinâmica =
+VAR TabelaCategorias =
+    TOPN(
+        1,
+        ADDCOLUMNS(
+            VALUES(olist_products_dataset[product_category_name]),
+            "__Valor", [Receita Produtos]
+        ),
+        [__Valor], DESC,
+        olist_products_dataset[product_category_name], ASC
+    )
+RETURN
+MAXX(TabelaCategorias, [__Valor])
+
+Categoria Líder Volume Dinâmica =
+VAR TabelaCategorias =
+    TOPN(
+        1,
+        ADDCOLUMNS(
+            VALUES(olist_products_dataset[product_category_name]),
+            "__Volume", [Itens Vendidos]
+        ),
+        [__Volume], DESC,
+        olist_products_dataset[product_category_name], ASC
+    )
+RETURN
+MAXX(TabelaCategorias, olist_products_dataset[product_category_name])
+
+Volume Categoria Líder Dinâmica =
+VAR TabelaCategorias =
+    TOPN(
+        1,
+        ADDCOLUMNS(
+            VALUES(olist_products_dataset[product_category_name]),
+            "__Volume", [Itens Vendidos]
+        ),
+        [__Volume], DESC,
+        olist_products_dataset[product_category_name], ASC
+    )
+RETURN
+MAXX(TabelaCategorias, [__Volume])
+
+// -------------------------------------------------------------
+// 08. CLIENTES - BASE, RECORRENCIA E VALOR
+// -------------------------------------------------------------
+
+Clientes Analisados =
+DISTINCTCOUNT(olist_order_customer_dataset[customer_unique_id])
+
+Clientes Recorrentes Dinâmicos =
+COUNTROWS(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) > 1
+    )
+)
+
+Taxa de Recorrência Dinâmica =
+DIVIDE(
+    [Clientes Recorrentes Dinâmicos],
+    [Clientes Analisados]
+)
+
+Gasto do Cliente =
+[Valor Total Pago]
+
+Mediana Gasto por Cliente =
+MEDIANX(
+    VALUES(olist_order_customer_dataset[customer_unique_id]),
+    CALCULATE([Valor Total Pago])
+)
+
+Mediana Gasto por Cliente Global =
+CALCULATE(
+    [Mediana Gasto por Cliente],
+    REMOVEFILTERS(olist_order_customer_dataset[customer_state])
+)
+
+Gasto Médio Recorrentes Alto Valor Dinâmico =
+VAR Limite = [Mediana Gasto por Cliente]
+VAR ClientesSelecionados =
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) > 1
+            && CALCULATE([Valor Total Pago]) > Limite
+    )
+RETURN
+AVERAGEX(
+    ClientesSelecionados,
+    CALCULATE([Valor Total Pago])
+)
+
+Gasto Médio Compra Única Alto Valor Dinâmico =
+VAR Limite = [Mediana Gasto por Cliente]
+VAR ClientesSelecionados =
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) = 1
+            && CALCULATE([Valor Total Pago]) > Limite
+    )
+RETURN
+AVERAGEX(
+    ClientesSelecionados,
+    CALCULATE([Valor Total Pago])
+)
+
+Perfil Cliente =
+DATATABLE(
+    "Tipo Cliente", STRING,
+    {
+        {"Compra única"},
+        {"Recorrente"}
+    }
+)
+
+Clientes Compra Única Alto Valor =
+VAR Limite = [Mediana Gasto por Cliente]
+RETURN
+COUNTROWS(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) = 1
+            && CALCULATE([Valor Total Pago]) > Limite
+    )
+)
+
+Clientes Compra Única Baixo Valor =
+VAR Limite = [Mediana Gasto por Cliente]
+RETURN
+COUNTROWS(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) = 1
+            && CALCULATE([Valor Total Pago]) <= Limite
+    )
+)
+
+Clientes Recorrentes Alto Valor =
+VAR Limite = [Mediana Gasto por Cliente]
+RETURN
+COUNTROWS(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) > 1
+            && CALCULATE([Valor Total Pago]) > Limite
+    )
+)
+
+Clientes Recorrentes Baixo Valor =
+VAR Limite = [Mediana Gasto por Cliente]
+RETURN
+COUNTROWS(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) > 1
+            && CALCULATE([Valor Total Pago]) <= Limite
+    )
+)
+
+Clientes Alto Valor por Perfil =
+SWITCH(
+    SELECTEDVALUE('Perfil Cliente'[Tipo Cliente]),
+    "Compra única", [Clientes Compra Única Alto Valor],
+    "Recorrente", [Clientes Recorrentes Alto Valor]
+)
+
+Clientes Baixo Valor por Perfil =
+SWITCH(
+    SELECTEDVALUE('Perfil Cliente'[Tipo Cliente]),
+    "Compra única", [Clientes Compra Única Baixo Valor],
+    "Recorrente", [Clientes Recorrentes Baixo Valor]
+)
+
+Valor Pago Compra Única =
+SUMX(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) = 1
+    ),
+    CALCULATE([Valor Total Pago])
+)
+
+Valor Pago Recorrentes =
+SUMX(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])) > 1
+    ),
+    CALCULATE([Valor Total Pago])
+)
+
+Receita por Perfil =
+SWITCH(
+    SELECTEDVALUE('Perfil Cliente'[Tipo Cliente]),
+    "Compra única", [Valor Pago Compra Única],
+    "Recorrente", [Valor Pago Recorrentes]
+)
+
+Clientes Recorrentes por Estado =
+[Clientes Recorrentes Dinâmicos]
+
+Clientes Alto Valor por Estado =
+VAR Limite = [Mediana Gasto por Cliente Global]
+RETURN
+COUNTROWS(
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        CALCULATE([Valor Total Pago]) > Limite
+    )
+)
+
+Pedidos por Perfil =
+VAR TipoSelecionado = SELECTEDVALUE('Perfil Cliente'[Tipo Cliente])
+VAR ClientesDoPerfil =
+    FILTER(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        VAR QtdPedidos = CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id]))
+        RETURN
+            SWITCH(
+                TipoSelecionado,
+                "Compra única", QtdPedidos = 1,
+                "Recorrente", QtdPedidos > 1
+            )
+    )
+RETURN
+CALCULATE(
+    DISTINCTCOUNT(olist_order_payments_dataset[order_id]),
+    ClientesDoPerfil
+)
+
+// -------------------------------------------------------------
+// 09. ENTREGAS - STATUS, PRAZO E SATISFACAO
+// -------------------------------------------------------------
+
+Status Entrega =
+VAR DataEntregue = INT(olist_orders_dataset[order_delivered_customer_date])
+VAR DataEstimada = INT(olist_orders_dataset[order_estimated_delivery_date])
+RETURN
+IF(
+    ISBLANK(olist_orders_dataset[order_delivered_customer_date])
+        || ISBLANK(olist_orders_dataset[order_estimated_delivery_date]),
+    BLANK(),
+    SWITCH(
+        TRUE(),
+        DataEntregue > DataEstimada, "Atrasado",
+        DataEntregue = DataEstimada, "No prazo",
+        DataEntregue < DataEstimada, "Adiantado"
+    )
+)
+
+Pedidos Entregues =
+CALCULATE(
+    DISTINCTCOUNT(olist_orders_dataset[order_id]),
+    NOT ISBLANK(olist_orders_dataset[order_delivered_customer_date])
+)
+
+Pedidos Atrasados =
+CALCULATE(
+    DISTINCTCOUNT(olist_orders_dataset[order_id]),
+    olist_orders_dataset[Status Entrega] = "Atrasado"
+)
+
+Taxa de Atraso =
+DIVIDE(
+    [Pedidos Atrasados],
+    [Pedidos Entregues]
+)
+
+Nota Média por Pedido =
+AVERAGEX(
+    VALUES(olist_orders_dataset[order_id]),
+    CALCULATE(AVERAGE(olist_order_reviews_dataset[review_score]))
+)
+
+Nota Média Atrasados =
+CALCULATE(
+    [Nota Média por Pedido],
+    olist_orders_dataset[Status Entrega] = "Atrasado"
+)
+
+Tempo Médio Real de Entrega =
+AVERAGEX(
+    FILTER(
+        olist_orders_dataset,
+        NOT ISBLANK(olist_orders_dataset[order_approved_at])
+            && NOT ISBLANK(olist_orders_dataset[order_delivered_customer_date])
+    ),
+    DATEDIFF(
+        olist_orders_dataset[order_approved_at],
+        olist_orders_dataset[order_delivered_customer_date],
+        DAY
+    )
+)
+
+Prazo Médio Prometido =
+AVERAGEX(
+    FILTER(
+        olist_orders_dataset,
+        NOT ISBLANK(olist_orders_dataset[order_approved_at])
+            && NOT ISBLANK(olist_orders_dataset[order_estimated_delivery_date])
+    ),
+    DATEDIFF(
+        olist_orders_dataset[order_approved_at],
+        olist_orders_dataset[order_estimated_delivery_date],
+        DAY
+    )
+)
+
+Mediana Tempo de Entrega =
+MEDIANX(
+    FILTER(
+        olist_orders_dataset,
+        NOT ISBLANK(olist_orders_dataset[order_approved_at])
+            && NOT ISBLANK(olist_orders_dataset[order_delivered_customer_date])
+    ),
+    DATEDIFF(
+        olist_orders_dataset[order_approved_at],
+        olist_orders_dataset[order_delivered_customer_date],
+        DAY
+    )
+)
+
+// Medidas por estado com TREATAS para propagar customer_id.
+Pedidos Entregues por Estado =
+CALCULATE(
+    [Pedidos Entregues],
+    TREATAS(
+        VALUES(olist_order_customer_dataset[customer_id]),
+        olist_orders_dataset[customer_id]
+    )
+)
+
+Pedidos Atrasados por Estado =
+CALCULATE(
+    [Pedidos Atrasados],
+    TREATAS(
+        VALUES(olist_order_customer_dataset[customer_id]),
+        olist_orders_dataset[customer_id]
+    )
+)
+
+Taxa de Atraso por Estado =
+DIVIDE(
+    [Pedidos Atrasados por Estado],
+    [Pedidos Entregues por Estado]
+)
+
+// -------------------------------------------------------------
+// 10. ENTREGAS - RECORRENCIA APOS A PRIMEIRA ENTREGA
+// -------------------------------------------------------------
+
+Perfil Primeira Entrega =
+DATATABLE(
+    "Status Primeira Entrega", STRING,
+    "Ordem", INTEGER,
+    {
+        {"Sem atraso", 1},
+        {"Com atraso", 2}
+    }
+)
+
+Taxa Recorrência Primeira Entrega Sem Atraso =
+VAR BaseClientes =
+    ADDCOLUMNS(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        "__QtdPedidos", CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])),
+        "__StatusPrimeira",
+            CALCULATE(
+                MAXX(
+                    TOPN(
+                        1,
+                        olist_orders_dataset,
+                        olist_orders_dataset[order_purchase_timestamp], ASC,
+                        olist_orders_dataset[order_id], ASC
+                    ),
+                    olist_orders_dataset[Status Entrega]
+                )
+            )
+    )
+VAR Elegiveis =
+    FILTER(
+        BaseClientes,
+        NOT ISBLANK([__StatusPrimeira]) && [__StatusPrimeira] <> "Atrasado"
+    )
+VAR Recorrentes = FILTER(Elegiveis, [__QtdPedidos] > 1)
+RETURN
+DIVIDE(COUNTROWS(Recorrentes), COUNTROWS(Elegiveis))
+
+Taxa Recorrência Primeira Entrega Com Atraso =
+VAR BaseClientes =
+    ADDCOLUMNS(
+        VALUES(olist_order_customer_dataset[customer_unique_id]),
+        "__QtdPedidos", CALCULATE(DISTINCTCOUNT(olist_orders_dataset[order_id])),
+        "__StatusPrimeira",
+            CALCULATE(
+                MAXX(
+                    TOPN(
+                        1,
+                        olist_orders_dataset,
+                        olist_orders_dataset[order_purchase_timestamp], ASC,
+                        olist_orders_dataset[order_id], ASC
+                    ),
+                    olist_orders_dataset[Status Entrega]
+                )
+            )
+    )
+VAR Elegiveis =
+    FILTER(BaseClientes, [__StatusPrimeira] = "Atrasado")
+VAR Recorrentes = FILTER(Elegiveis, [__QtdPedidos] > 1)
+RETURN
+DIVIDE(COUNTROWS(Recorrentes), COUNTROWS(Elegiveis))
+
+Taxa Recorrência por Primeira Entrega =
+SWITCH(
+    SELECTEDVALUE('Perfil Primeira Entrega'[Status Primeira Entrega]),
+    "Sem atraso", [Taxa Recorrência Primeira Entrega Sem Atraso],
+    "Com atraso", [Taxa Recorrência Primeira Entrega Com Atraso]
+)
